@@ -194,7 +194,11 @@ class Helper:
 
 
     def cq_get_image(self, image_link): 
-        while not os.path.exists(image_link):                                                    
+        while not os.path.exists(image_link): 
+            time.sleep(1)
+        last_size = 0
+        while not os.path.getsize(image_link) == last_size: 
+            last_size = os.path.getsize(image_link)
             time.sleep(1)
         file = tempfile.NamedTemporaryFile()
         try:
@@ -229,27 +233,20 @@ class Helper:
 
     def poll(self):
         error_count = 0
+        first_load = False
+        last_msg_dict = {}
+        path_pattern = os.path.join(self.storage_path, "last_msg.json")
+        if os.path.isfile(path_pattern):
+            with open(path_pattern, "r") as f:
+                last_msg_dict = json.loads(f.read())
+        else:
+            first_load = True
         while True:
             try:
                 chat_list = requests.get(user_url % (self.hostname, self.port)).json()
 
-                # Get last list
-                last_list = []
-                path_pattern = os.path.join(self.storage_path, "last_list.json")
-                if os.path.isfile(path_pattern):
-                    with open(path_pattern, "r") as f:
-                        last_msg = json.loads(f.read())
-
-                # Record last list
-                path_pattern = os.path.join(self.storage_path, "last_list.json")
-                with open(path_pattern, "w") as f:
-                    f.write(json.dumps(last_list))
-
                 # Check message update
                 for chat_item in chat_list:
-                    if chat_item in last_list:
-                        continue
-
                     user_id = chat_item["userId"]
                     if user_id in ["weixin", "notifymessage"]:
                         continue
@@ -259,16 +256,14 @@ class Helper:
 
                     # Get last message
                     last_msg = {}
-                    path_pattern = os.path.join(self.storage_path, "last_msg_%s.json")
-                    if os.path.isfile(path_pattern % user_id):
-                        with open(path_pattern % user_id, "r") as f:
-                            last_msg = json.loads(f.read())
+                    if user_id in last_msg_dict:
+                        last_msg = last_msg_dict[user_id]
 
                     # Record last message
-                    path_pattern = os.path.join(self.storage_path, "last_msg_%s.json")
-                    if msg_list and len(msg_list) > 0:
-                        with open(path_pattern % user_id, "w") as f:
-                            f.write(json.dumps(clean_msg(msg_list[0], cur_date)))
+                    if len(msg_list) > 0:
+                        last_msg_dict[user_id] = clean_msg(msg_list[0], cur_date)
+                    if first_load:
+                        continue
 
                     # Get new message list
                     new_msg_list = []
@@ -339,6 +334,11 @@ class Helper:
                             efb_msg.author = author
                         efb_msg.deliver_to = coordinator.master
                         self.send_message_wrapper(efb_msg)
+
+                path_pattern = os.path.join(self.storage_path, "last_msg.json")
+                with open(path_pattern, "w") as f:
+                    f.write(json.dumps(last_msg_dict))
+                first_load = False
 
             except requests.exceptions.RequestException as e:
                 print(e)
